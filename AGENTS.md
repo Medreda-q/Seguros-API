@@ -22,10 +22,11 @@
 6. **Pas de MapStruct ni d'automapping opaque** : Tous les mappers sont écrits à la main dans `com.seguros.api.dto.mapper`.
 7. **`java.time.Clock` injecté obligatoirement** : Ne JAMAIS utiliser `LocalDate.now()` directement. Toujours injecter un bean `Clock` configuré sur `ZoneId.of("Europe/Madrid")` pour garantir des tests déterministes.
 8. **Gestion monétaire stricte** : `BigDecimal` avec `RoundingMode.HALF_UP` et échelle à 2 décimales pour toute somme d'argent. Ne jamais utiliser `float` ou `double`.
-9. **JPA & Hibernate Proxy-safe** :
+9. **JPA & Hibernate Proxy-safe & Contraintes DB** :
    - `spring.jpa.open-in-view=false` dans toute l'application.
    - `spring.jpa.hibernate.ddl-auto=validate` (aucune création dynamique de schéma par Hibernate, Flyway fait foi).
    - Les méthodes `equals()` et `hashCode()` des entités doivent utiliser `if (!(o instanceof Entity other)) return false;` (compatible avec les proxys Hibernate) et se baser sur une clé métier unique (`dniNie`, `numero`).
+   - **Tests de contraintes DB (`UNIQUE`, index partiel)** : Toujours utiliser `repository.saveAndFlush()` et attendre `DataIntegrityViolationException`. `save()` seul retarde l'envoi SQL (write-behind), et `TestEntityManager.persistAndFlush()` by-passerait la traduction Spring Data en exposant l'exception brute Hibernate `ConstraintViolationException`.
 
 ---
 
