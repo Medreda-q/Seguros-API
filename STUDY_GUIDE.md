@@ -46,50 +46,60 @@ En Java (et dans la plupart des langages), les types primitifs `float` et `doubl
 
 ---
 
-### Concepts Fondamentaux de l'Étape 1.2
+### Étape 1.3 : Entités JPA & Modélisation du Domaine Métier
 
-#### 1. Parité Dev / Test : Le piège de la base en mémoire H2
-Pourquoi avoir banni H2 au profit d'un vrai PostgreSQL pour les tests ?
-- **Différences de dialecte SQL :** H2 et PostgreSQL n'ont pas les mêmes fonctions natives (ex: gestion des types JSONB, séquences IDENTITY, fonctions de date `INTERVAL`, contraintes partielles).
-- **Sensibilité à la casse et verrous :** La gestion des transactions, des niveaux d'isolation (`READ COMMITTED` vs `SERIALIZABLE`) et du verrouillage pessimiste (`SELECT ... FOR UPDATE`) diffère radicalement entre un moteur en mémoire monothreadé comme H2 et un SGBD distribué comme PostgreSQL.
-- **Principe des 12-Factor Apps :** Le principe de *Dev/Prod Parity* stipule que les environnements de développement, de test et de production doivent utiliser des dépendances sous-jacentes strictement identiques pour éliminer la classe d'anomalies "ça marchait en local avec H2, mais ça crashe en recette sur PostgreSQL".
-
-#### 2. Sécurité & Intégrité : `ddl-auto=validate` vs `ddl-auto=update`
-Dans Hibernate / JPA :
-- `ddl-auto=create` ou `update` délègue à l'ORM le droit de générer ou modifier les tables. En environnement professionnel ou certifié sécurité, **ce mode est proscrit** :
-  - Il ne supprime jamais les colonnes orphelines (il accumule la dette technique).
-  - Il génère des contraintes et des index avec des noms aléatoires (`UK_xxxxxxxxxxx`).
-  - Il peut bloquer la base en posant des verrous exclusifs sans préavis.
-- `ddl-auto=validate` inverse le rapport de force : **Flyway est l'unique source de vérité du schéma**. Au démarrage de Spring Boot :
-  1. Flyway applique les scripts de migration (`V1__...`, `V2__...`).
-  2. Hibernate inspecte les tables physiques et les compare aux métadonnées des classes Java `@Entity`.
-  3. Si la moindre colonne, type ou contrainte ne correspond pas exactement, l'application refuse de démarrer avec une `SchemaManagementException`.
+#### Ce que nous avons construit :
+- [`src/main/java/com/seguros/api/entity/BaseEntity.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/BaseEntity.java) : Classe `@MappedSuperclass` factorisant `created_at` et `updated_at` en UTC via `@PrePersist` et `@PreUpdate`.
+- [`src/main/java/com/seguros/api/entity/Cliente.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/Cliente.java) : Entité JPA du client (tomador) avec relation `@OneToMany` vers ses polices et égalité sur clé métier `dniNie`.
+- [`src/main/java/com/seguros/api/entity/Poliza.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/Poliza.java) : Entité du contrat d'assurance liée à `Cliente` par `@ManyToOne(fetch = FetchType.LAZY)`.
+- [`src/main/java/com/seguros/api/entity/Siniestro.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/Siniestro.java) : Entité de déclaration de sinistre liée à `Poliza` par `@ManyToOne(fetch = FetchType.LAZY)`.
+- Énumérations typées sous `entity.enums` :
+  - [`TipoPoliza.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/enums/TipoPoliza.java) (`AUTO`, `HOGAR`, `VIDA`).
+  - [`EstadoPoliza.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/enums/EstadoPoliza.java) (`ACTIVA`, `SUSPENDIDA`, `CANCELADA`).
+  - [`EstadoSiniestro.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/enums/EstadoSiniestro.java) (`ABIERTO`, `EN_REVISION`, `APROBADO`, `RECHAZADO`).
 
 ---
 
-### Questions d'entretien technique (Étape 1.2)
+### Concepts Fondamentaux de l'Étape 1.3
 
-1. **À quoi sert la table `flyway_schema_history` générée par Flyway ?**
-   - *Réponse :* Cette table stocke la somme de contrôle (checksum SHA-256), la version, la date d'exécution et le statut de chaque script de migration appliqué. Elle garantit qu'un script déjà exécuté n'a pas été altéré a posteriori et empêche l'exécution de migrations dans le désordre.
+#### 1. Le piège du chargement : `FetchType.LAZY` vs `FetchType.EAGER`
+- **Le problème :** En JPA, la spécification définit que les annotations `@ManyToOne` et `@OneToOne` ont par défaut une stratégie de chargement `EAGER` (avide/immédiate).
+- **Conséquence dramatique (Le problème N+1 requêtes) :** Si tu exécutes une requête pour lister 100 sinistres, Hibernate va exécuter 1 requête pour récupérer les sinistres, puis 100 requêtes SQL supplémentaires pour récupérer les polices rattachées, et potentiellement 100 autres pour les clients !
+- **La solution défensive :** Déclarer explicitement `fetch = FetchType.LAZY` sur **toutes** les relations `@ManyToOne`. Les données associées ne seront chargées que si le code appelle explicitement le getter dans une transaction active, ou lors d'une requête optimisée avec `JOIN FETCH`.
 
-2. **Pourquoi l'option `server.error.include-stacktrace: never` est-elle une recommandation de sécurité OWASP ?**
-   - *Réponse :* Afficher la stack trace dans une réponse HTTP 500 divulgue des informations architecturales sensibles (OWASP A05 - Security Misconfiguration / Information Disclosure) : versions exactes des librairies, noms de packages internes, structures de requêtes SQL ou chemins de fichiers sur le serveur, ce qui facilite grandement le travail d'un attaquant.
+#### 2. Sécurité de typage : `@Enumerated(EnumType.STRING)`
+- **Pourquoi pas le mode par défaut (`EnumType.ORDINAL`) ?** Par défaut, JPA stocke les énumérations sous forme d'entiers correspondant à leur position dans la déclaration Java (0, 1, 2...). Si plus tard un développeur insère un nouvel état (ex. `EN_ATTENTE`) au milieu de l'enum, tous les numéros sont décalés en base de données, corrompant silencieusement l'historique de production !
+- **Avantage de `EnumType.STRING` :** La valeur textuelle exacte (`ACTIVA`, `SUSPENDIDA`) est enregistrée dans PostgreSQL, assurant la résilience du schéma et une parfaite lisibilité lors des audits directs sous DBeaver.
 
-3. **Quelle est l'utilité des scripts Maven Wrapper (`mvnw` / `mvnw.cmd`) dans un projet d'équipe ?**
-   - *Réponse :* Ils permettent à n'importe quel développeur ou serveur d'intégration continue (CI/CD) de compiler le projet sans installer Maven au préalable sur le système hôte, garantissant que tout le monde utilise exactement la même version de Maven (ici 3.9.9).
+#### 3. Égalité et identité JPA : Le piège de `equals` et `hashCode`
+- Utiliser l'`id` autogénéré dans `equals()` pose un problème majeur : avant que l'entité ne soit sauvegardée (`repository.save()`), son `id` est `null`. Si tu ajoutes deux nouvelles entités dans un `Set` Java, elles seront considérées comme identiques car toutes deux ont `id == null` !
+- La bonne pratique consiste à baser `equals()` et `hashCode()` sur une **clé métier unique et immuable** (Business Key) : le `dniNie` pour un client, et le numéro de référence (`numero`) pour une police ou un sinistre.
 
-4. **Pourquoi avons-nous configuré `ON DELETE RESTRICT` sur nos clés étrangères plutôt que `CASCADE` ?**
-   - *Réponse :* En domaine bancaire et d'assurance, la suppression en cascade est dangereuse : supprimer un client par erreur détruirait l'historique de ses polices et de ses sinistres. `RESTRICT` empêche formellement la suppression d'un client tant qu'il possède des polices rattachées, préservant l'intégrité référentielle et les pistes d'audit.
+---
 
-5. **Pourquoi la colonne de montant est-elle typée `NUMERIC(12, 2)` sous PostgreSQL et non `FLOAT` ou `REAL` ?**
-   - *Réponse :* En SQL, `NUMERIC` (ou `DECIMAL`) est un type à virgule fixe à précision exacte, mappé nativement vers `java.math.BigDecimal`. Les types `FLOAT` et `REAL` sont approximatifs et soufriraient des mêmes erreurs d'arrondi binaire que `double` en Java.
+### Questions d'entretien technique (Étape 1.3)
+
+1. **Qu'est-ce que le problème des requêtes N+1 et comment le détecte-t-on ?**
+   - *Réponse :* C'est une anomalie de performance où l'ORM exécute 1 requête initiale pour obtenir N enregistrements parents, puis N requêtes unitaires supplémentaires pour récupérer leurs enfants associés (généralement causé par un `FetchType.EAGER`). On le détecte en observant les logs SQL (`show-sql: true` ou via un profiler de requêtes) où une avalanche de requêtes `SELECT ... WHERE id = ?` apparaît.
+
+2. **Quelle est l'utilité de l'annotation `@MappedSuperclass` par rapport à une entité classique `@Entity` ?**
+   - *Réponse :* Une classe annotée `@MappedSuperclass` (comme notre `BaseEntity`) ne correspond pas à une table physique en base de données. Elle permet d'hériter des attributs communs (ici `createdAt`, `updatedAt`) et de leurs règles de cycle de vie (`@PrePersist`) sans créer de table dédiée ni de jointure d'héritage complexe.
+
+3. **Pourquoi est-il risqué de générer automatiquement `equals()` et `hashCode()` avec tous les attributs dans une entité JPA ?**
+   - *Réponse :* Cela force l'évaluation des collections et des relations paresseuses (`LAZY`), ce qui peut déclencher un chargement intempestif de graphes d'objets entiers ou lever une `LazyInitializationException` si la session Hibernate est fermée. De plus, cela peut provoquer des boucles infinies (`StackOverflowError`) en cas de relation bidirectionnelle.
+
+4. **Quelle est la différence entre `CascadeType.REMOVE` et la clause SQL `ON DELETE CASCADE` ?**
+   - *Réponse :* `CascadeType.REMOVE` est géré côté Java par Hibernate, qui charge d'abord chaque entité enfant en mémoire avant de déclencher des `DELETE` individuels. `ON DELETE CASCADE` est géré directement par le moteur de base de données PostgreSQL lors de la suppression de la ligne parente. Dans notre API, nous rejetons les deux au profit de `RESTRICT` pour protéger l'intégrité de l'historique assurantiel.
+
+5. **Pourquoi utilise-t-on `OffsetDateTime` plutôt que `LocalDateTime` pour les horodatages techniques ?**
+   - *Réponse :* `LocalDateTime` ne contient aucune information de décalage horaire ou de fuseau. En environnement distribué ou lors d'audits de sécurité, `OffsetDateTime` avec `ZoneOffset.UTC` garantit un enregistrement universel et non ambigu de l'instant exact d'un événement, insensible aux changements d'heure saisonniers.
 
 ---
 
 ### Exercices pratiques pour toi
 
-1. **Exercice 1 (Inspection Flyway) :**
-   - Ouvre le fichier [`V1__initial_schema.sql`](file:///C:/dev/seguros-api/src/main/resources/db/migration/V1__initial_schema.sql).
-   - Identifie les 3 contraintes de vérification (`CHECK`) appliquées sur la table `polizas` et explique le rôle défensif de chacune en cas d'insertion SQL directe frauduleuse.
-2. **Exercice 2 (Parité et isolation) :**
-   - Pourquoi est-il indispensable que la base de test `seguros_test_db` soit distincte de la base de développement `seguros_db` lorsque les développeurs lancent la commande `mvn test` ? Quels risques ferait courir une base partagée unique ?
+1. **Exercice 1 (Analyse de la relation Poliza -> Cliente) :**
+   - Regarde l'attribut `cliente` dans [`Poliza.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/Poliza.java).
+   - Pourquoi avons-nous combiné `@ManyToOne(fetch = FetchType.LAZY, optional = false)` avec `@JoinColumn(name = "cliente_id", nullable = false)` ? Que se passe-t-il si un développeur essaie d'instancier une police sans lui rattacher de client ?
+2. **Exercice 2 (Conception d'audit) :**
+   - Dans [`BaseEntity.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/entity/BaseEntity.java), pourquoi le champ `createdAt` a-t-il l'attribut `updatable = false` ? Quel principe de sécurité cela protège-t-il ?
