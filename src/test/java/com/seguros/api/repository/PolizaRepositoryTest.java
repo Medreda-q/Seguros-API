@@ -170,7 +170,8 @@ class PolizaRepositoryTest {
 
         // Doit lever une DataIntegrityViolationException au flush grâce à l'index partiel PostgreSQL V2
         assertThatThrownBy(() -> polizaRepository.saveAndFlush(polizaDoublon))
-            .isInstanceOf(DataIntegrityViolationException.class);
+            .isInstanceOf(DataIntegrityViolationException.class)
+            .hasMessageContaining("uq_polizas_activa_cliente_tipo");
     }
 
     @Test
