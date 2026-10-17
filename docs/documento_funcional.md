@@ -239,20 +239,30 @@ La tabla de correspondencias del Ministerio del Interior es:
    - Cálculo: $\text{resto} = \text{número (8 dígitos)} \pmod{23}$. La letra en la posición `resto` debe coincidir con la letra del DNI.
 2. **NIE:**
    - Formato: 1 letra inicial ('X', 'Y', 'Z') seguida de 7 dígitos y 1 letra de control.
-   - Normalización de la letra inicial:
-     - `X` $\rightarrow$ se reemplaza por `0`
-     - `Y` $\rightarrow$ se reemplaza por `1`
-     - `Z` $\rightarrow$ se reemplaza por `2`
-   - Se forma un número de 8 dígitos y se aplica el mismo algoritmo módulo 23.
+   - Normalización de la le## 5. Especificación Técnica de la API REST (Fase 1)
+
+### 5.1. Alcance y Seguridad (Autenticación fuera de alcance)
+> **Nota de Seguridad de la Fase 1:**
+> Los mecanismos de **autenticación y autorización** (Spring Security, tokens JWT, OAuth2, control de acceso basado en roles RBAC) están **explícitamente fuera del alcance de la Fase 1**. El objetivo de esta fase se centra en la robustez del modelo de dominio, la integridad transaccional, el cálculo actuarial, las validaciones de negocio y la prevención de condiciones de carrera. La capa de seguridad perimetral se implementará en la Fase 2.
 
 ---
 
-## 5. Especificación Técnica de la API REST (Fase 1)
+### 5.2. Formato de Serialización JSON: Fechas y Moneda
+1. **Fechas en formato estricto ISO-8601:**
+   - Fechas locales (`LocalDate`): `YYYY-MM-DD` (ej: `2026-06-15`).
+   - Marcas temporales de auditoría (`OffsetDateTime`): `YYYY-MM-DD'T'HH:mm:ssXXX` en UTC/Europe-Madrid (ej: `2026-06-15T10:00:00Z`).
+2. **Montes monetarios en BigDecimal sin redondeo implícito:**
+   - Todo importe (`primaAnual`, `importeReclamado`) se serializa a partir de `java.math.BigDecimal` preservando exactamente **2 decimales** (ej: `500.00`, `260.00`).
+   - Se prohíbe cualquier conversión intermedia a `double` o `float` que pudiera introducir pérdida de precisión IEEE 754 o redondeos implícitos no controlados.
 
-### 5.1. Estándar de Errores: ProblemDetail (RFC 7807)
+---
+
+### 5.3. Estándar de Errores: ProblemDetail (RFC 7807)
 Todas las respuestas de error devueltas por la API siguen el estándar internacional **RFC 7807 (`application/problem+json`)**, implementado a través de la clase `org.springframework.http.ProblemDetail`.
 
-#### A) Estructura JSON estándar:
+#### A) Reloj inyectado obligatorio para el campo `timestamp`:
+El campo `timestamp` incluido en todas las respuestas de error se obtiene **exclusivamente a partir del bean `Clock` inyectado** (`Instant.now(clock)` u `OffsetDateTime.now(clock)`). Queda prohibido el uso directo de `Instant.now()`.
+
 ```json
 {
   "type": "about:blank",
@@ -265,7 +275,7 @@ Todas las respuestas de error devueltas por la API siguen el estándar internaci
 ```
 
 #### B) Estructura para Errores de Validación Bean (HTTP 400):
-Cuando la validación de un DTO de entrada falla (`@Valid`), se incorpora la extensión `invalidParams` o `errors` con el detalle de cada campo infractor:
+Cuando la validación de un DTO de entrada falla (`@Valid`), se incorpora la extensión `errors` con el desglose exacto de cada campo infractor:
 ```json
 {
   "type": "about:blank",
@@ -287,64 +297,89 @@ Cuando la validación de un DTO de entrada falla (`@Valid`), se incorpora la ext
 }
 ```
 
-#### C) Matriz de Mapeo de Excepciones a Códigos HTTP:
+#### C) Tratamiento Seguro de Errores 500 (OWASP & Trazabilidad):
+Para cualquier error interno imprevisto (`HTTP 500 Internal Server Error`), se aplican dos reglas de seguridad:
+1. **Respuesta neutra al cliente con identificador de correlación:**
+   El cliente HTTP recibe un mensaje completamente genérico y un identificador único de rastreo (`traceId` generado mediante UUID):
+   ```json
+   {
+     "type": "about:blank",
+     "title": "Error interno del servidor",
+     "status": 500,
+     "detail": "Ha ocurrido un error interno en el servidor. Por favor, contacte con soporte técnico indicando el identificador de rastreo.",
+     "instance": "/api/v1/polizas",
+     "timestamp": "2026-10-17T20:30:00Z",
+     "traceId": "c3b9e4a1-8720-4a89-9e12-b2586cfb9931"
+   }
+   ```
+2. **Cero fugas técnicas y logging exhaustivo:**
+   La traza de la pila (*stack trace*), nombres de tablas SQL o errores de PostgreSQL **nunca** se envían en el cuerpo HTTP. El servidor registra la excepción en los logs con nivel `ERROR` asociando el mismo `traceId` para facilitar la auditoría y depuración:
+   `logger.error("Error no controlado [traceId={}]: ", traceId, ex);`
+
+#### D) Matriz de Mapeo de Excepciones a Códigos HTTP:
 
 | Excepción Java | Código HTTP | Razón / Escenario |
 | :--- | :---: | :--- |
 | `ResourceNotFoundException` | **404 Not Found** | Identificador de cliente, póliza o siniestro inexistente en base de datos. |
-| `BusinessConflictException` | **409 Conflict** | Violación de regla de unicidad activa (4.4.1), póliza suspendida/cancelada/expirada en siniestro, cliente con pólizas activas. |
+| `BusinessConflictException` | **409 Conflict** | Violación de regla de unicidad activa (4.4.1), duplicidad de DNI/NIE, póliza suspendida/cancelada/expirada en siniestro, cliente con pólizas activas en borrado. |
 | `BusinessRuleException` | **400 Bad Request** | Fecha en el pasado (4.4.2), siniestro fuera de vigencia o futuro (4.5.3, 4.5.4), transición de estado inválida, cliente menor de edad. |
 | `MethodArgumentNotValidException` | **400 Bad Request** | Faltan campos obligatorios `@NotNull`, `@NotBlank`, formatos erróneos `@Pattern`, importes no positivos `@Positive`. |
 | `DataIntegrityViolationException` | **409 Conflict** | Detección de colisión concurrente a nivel base de datos no capturada previamente (ej: colisión de índice único). |
-| `Exception` (cualquier error no controlado) | **500 Internal Server Error** | Fallo imprevisto del servidor. Mensaje neutro y controlado. |
-
-#### D) Reglas de Seguridad OWASP para el Manejo de Errores:
-1. **Cero fugas de información interna:** El `GlobalExceptionHandler` **NUNCA** devuelve la traza de la pila (*stack trace*), nombres de tablas SQL, ni mensajes de error de bajo nivel del driver PostgreSQL en las respuestas HTTP.
-2. **Registro seguro (Logging):** Las excepciones se registran en los logs del servidor con nivel `ERROR` o `WARN` con su contexto, mientras que el cliente HTTP sólo recibe mensajes de negocio claros y depurados.
+| `Exception` (cualquier error no controlado) | **500 Internal Server Error** | Fallo imprevisto del servidor. Mensaje neutro con `traceId` sin fuga de trazas. |
 
 ---
 
-### 5.2. Paginación y Protección de Datos Sensibles (PII)
+### 5.4. Política de Paginación y Protección de Datos Sensibles (PII)
 
-1. **Paginación uniforme:** Todos los listados (`GET`) soportan paginación mediante `org.springframework.data.domain.Pageable`:
-   - Parámetros query: `?page=0&size=20&sort=createdAt,desc`.
-   - Las respuestas devuelven una estructura paginada estándar (`content`, `pageable`, `totalElements`, `totalPages`, etc.).
-2. **Enmascaramiento de PII:** 
-   - El DNI/NIE se expone enmascarado: `*****678Z`.
-   - El IBAN se expone enmascarado: `ES12 **** **** 3456`.
-   - Ninguna respuesta expone contraseñas, claves internas ni proxies Hibernate.
+#### A) Justificación de la Estrategia de Paginación:
+1. **Listado global de clientes (`GET /api/v1/clientes`):** 
+   - **Paginado obligatoriamente** mediante `Pageable` (`?page=0&size=20&sort=createdAt,desc`). 
+   - *Justificación:* El volumen de clientes de una entidad aseguradora es ilimitado (miles a millones de registros); la paginación es indispensable para evitar el desbordamiento de memoria JVM y la sobrecarga de PostgreSQL.
+2. **Listado de pólizas por cliente (`GET /api/v1/polizas/cliente/{id}`):**
+   - **No paginado (`List<PolizaResponse>`)**, ordenado por `createdAt DESC`.
+   - *Justificación:* La cardinalidad negocio por cliente es naturalmente muy baja (un asegurado raramente contrata más de 3 a 5 pólizas simultáneas a lo largo de su relación comercial). Evitar el envoltorio de paginación reduce la sobrecarga de metadatos en el cliente HTTP sin riesgo de rendimiento.
+3. **Listado de siniestros por póliza (`GET /api/v1/siniestros/poliza/{id}`):**
+   - **No paginado (`List<SiniestroResponse>`)**, ordenado por `fechaOcurrencia DESC`.
+   - *Justificación:* El número de siniestros registrados por póliza anual es intrínsecamente reducido (típicamente de 0 a 3 expedientes). Una lista directa es más ergonómica y eficiente.
+
+#### B) Enmascaramiento Sistemático de PII:
+- El DNI/NIE se expone enmascarado: `*****678Z`.
+- El IBAN se expone enmascarado: `ES12 **** **** 3456`.
+- Ninguna respuesta expone contraseñas, claves internas ni proxies Hibernate.
 
 ---
 
-### 5.3. Catálogo Detallado de Endpoints REST
+### 5.5. Catálogo Detallado de Endpoints REST
 
-#### 5.3.1. Clientes (`/api/v1/clientes`)
+#### 5.5.1. Clientes (`/api/v1/clientes`)
 
 | Método | URL | DTO Entrada | DTO Salida | Códigos HTTP | Descripción / Comportamiento |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/clientes` | `ClienteCreateRequest` | `ClienteResponse` | `201 Created`<br>`400 Bad Request`<br>`409 Conflict` | Crea un nuevo cliente asegurado. Valida DNI/NIE módulo 23, IBAN, mayoría de edad ($\ge 18$ años). |
-| `GET` | `/api/v1/clientes` | *Ninguno (Query params de paginación)* | `Page<ClienteResponse>` | `200 OK` | Listado paginado de clientes ordenado por fecha de creación descendente. |
+| `POST` | `/api/v1/clientes` | `ClienteCreateRequest` | `ClienteResponse` | `201 Created`<br>`400 Bad Request`<br>`409 Conflict` | Crea un nuevo cliente asegurado. Valida DNI/NIE módulo 23 único, IBAN, mayoría de edad ($\ge 18$ años). |
+| `GET` | `/api/v1/clientes` | *Query params: `page`, `size`, `sort`* | `Page<ClienteResponse>` | `200 OK` | Listado paginado de clientes ordenado por fecha de creación descendente. |
 | `GET` | `/api/v1/clientes/{id}` | *Path variable: `id`* | `ClienteResponse` | `200 OK`<br>`404 Not Found` | Consulta detallada del cliente por su ID. |
-| `PUT` | `/api/v1/clientes/{id}` | `ClienteUpdateRequest` | `ClienteResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Modifica los datos de contacto y facturación (nombre, apellidos, email, teléfono, IBAN). |
+| `PUT` | `/api/v1/clientes/{id}` | `ClienteUpdateRequest` | `ClienteResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Modifica los datos de contacto y facturación (nombre, apellidos, email, teléfono, IBAN). 409 si colisiona con datos únicos existentes. |
 | `DELETE` | `/api/v1/clientes/{id}` | *Path variable: `id`* | *Ninguno (Void)* | `204 No Content`<br>`404 Not Found`<br>`409 Conflict` | Elimina el cliente. Rechazado con 409 si tiene alguna póliza en estado `ACTIVA`. |
 
-#### 5.3.2. Pólizas (`/api/v1/polizas`)
+#### 5.5.2. Pólizas (`/api/v1/polizas`)
 
 | Método | URL | DTO Entrada | DTO Salida | Códigos HTTP | Descripción / Comportamiento |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/polizas` | `PolizaCreateRequest` | `PolizaResponse` | `201 Created`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Emite una nueva póliza. Calcula automáticamente `primaAnual` en BigDecimal. Aplica Regla 4.4.1 (unicidad activa) y Regla 4.4.2 (`fechaInicio >= hoy`). Genera número `POL-{TIPO}-{ANIO}-{0001}`. |
 | `GET` | `/api/v1/polizas/{id}` | *Path variable: `id`* | `PolizaResponse` | `200 OK`<br>`404 Not Found` | Consulta de póliza por su ID, con DNI/NIE de titular enmascarado. |
 | `GET` | `/api/v1/polizas/numero/{numero}` | *Path variable: `numero`* | `PolizaResponse` | `200 OK`<br>`404 Not Found` | Consulta de póliza por su número legible único (ej: `POL-AUTO-2026-0001`). |
-| `GET` | `/api/v1/polizas/cliente/{clienteId}` | *Path variable: `clienteId`* | `List<PolizaResponse>` | `200 OK`<br>`404 Not Found` | Lista todas las pólizas pertenecientes a un cliente dado. |
+| `GET` | `/api/v1/polizas/cliente/{clienteId}` | *Path variable: `clienteId`* | `List<PolizaResponse>` | `200 OK`<br>`404 Not Found` | Lista todas las pólizas pertenecientes a un cliente dado (no paginado, baja cardinalidad). |
 | `PATCH` | `/api/v1/polizas/{id}/estado` | `PolizaEstadoUpdateRequest` | `PolizaResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Transición controlada de estado según la matriz: `ACTIVA` $\leftrightarrow$ `SUSPENDIDA` $\rightarrow$ `CANCELADA`. Reactivación a `ACTIVA` revérifie la Regla 4.4.1. |
 
-#### 5.3.3. Siniestros (`/api/v1/siniestros`)
+#### 5.5.3. Siniestros (`/api/v1/siniestros`)
 
 | Método | URL | DTO Entrada | DTO Salida | Códigos HTTP | Descripción / Comportamiento |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/siniestros` | `SiniestroCreateRequest` | `SiniestroResponse` | `201 Created`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Declara un nuevo siniestro respetando estrictamente el orden de las 5 verificaciones (404 si póliza no existe, 409 si póliza no ACTIVA o expirada, 400 si fecha fuera de rango o futura). Genera número `SIN-{ANIO}-{0001}` e inicializa en `ABIERTO`. |
 | `GET` | `/api/v1/siniestros/{id}` | *Path variable: `id`* | `SiniestroResponse` | `200 OK`<br>`404 Not Found` | Consulta de un siniestro por su ID. |
 | `GET` | `/api/v1/siniestros/numero/{numero}` | *Path variable: `numero`* | `SiniestroResponse` | `200 OK`<br>`404 Not Found` | Consulta de un siniestro por su número de expediente único (ej: `SIN-2026-0001`). |
-| `GET` | `/api/v1/siniestros/poliza/{polizaId}` | *Path variable: `polizaId`* | `List<SiniestroResponse>` | `200 OK`<br>`404 Not Found` | Lista todos los siniestros asociados a una póliza dada. |
+| `GET` | `/api/v1/siniestros/poliza/{polizaId}` | *Path variable: `polizaId`* | `List<SiniestroResponse>` | `200 OK`<br>`404 Not Found` | Lista todos los siniestros asociados a una póliza dada (no paginado, baja cardinalidad). |
+| `PATCH` | `/api/v1/siniestros/{id}/estado` | `SiniestroEstadoUpdateRequest` | `SiniestroResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Avance del ciclo de vida del siniestro: `ABIERTO` $\rightarrow$ `EN_REVISION` $\rightarrow$ `APROBADO` / `RECHAZADO` (estados terminales). |
+dos a una póliza dada. |
 | `PATCH` | `/api/v1/siniestros/{id}/estado` | `SiniestroEstadoUpdateRequest` | `SiniestroResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Avance del ciclo de vida del siniestro: `ABIERTO` $\rightarrow$ `EN_REVISION` $\rightarrow$ `APROBADO` / `RECHAZADO` (estados terminales). |
 
