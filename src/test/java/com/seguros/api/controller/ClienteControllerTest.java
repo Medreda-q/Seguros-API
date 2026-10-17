@@ -74,9 +74,9 @@ class ClienteControllerTest {
                 "Carlos",
                 "García Lorca",
                 "carlos@example.es",
-                "612345678",
+                "+34612345678",
                 LocalDate.of(1990, 5, 20),
-                "ES1234567890123456783456"
+                "ES1234567890123456789012"
             );
 
             when(clienteService.createCliente(any())).thenReturn(sampleResponse);
@@ -124,9 +124,9 @@ class ClienteControllerTest {
                 "Carlos",
                 "García Lorca",
                 "carlos@example.es",
-                "612345678",
+                "+34612345678",
                 LocalDate.of(1990, 5, 20),
-                "ES1234567890123456783456"
+                "ES1234567890123456789012"
             );
 
             when(clienteService.createCliente(any()))
@@ -150,9 +150,9 @@ class ClienteControllerTest {
                 "Menor",
                 "Gómez",
                 "menor@example.es",
-                "612345678",
+                "+34612345678",
                 LocalDate.of(2010, 1, 1),
-                "ES1234567890123456783456"
+                "ES1234567890123456789012"
             );
 
             when(clienteService.createCliente(any()))
@@ -184,7 +184,7 @@ class ClienteControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)))
                 .andExpect(jsonPath("$.content[0].nombre").value("Carlos"))
-                .andExpect(jsonPath("$.page.totalElements").value(1));
+                .andExpect(jsonPath("$.totalElements").value(1));
         }
 
         @Test
@@ -224,8 +224,8 @@ class ClienteControllerTest {
                 "Carlos Alberto",
                 "García Lorca",
                 "carlos.nuevo@example.es",
-                "699887766",
-                "ES1234567890123456783456"
+                "+34699887766",
+                "ES9876543210987654321098"
             );
 
             when(clienteService.updateCliente(eq(1L), any())).thenReturn(sampleResponse);
@@ -244,8 +244,8 @@ class ClienteControllerTest {
                 "Carlos Alberto",
                 "García Lorca",
                 "carlos.nuevo@example.es",
-                "699887766",
-                "ES1234567890123456783456"
+                "+34699887766",
+                "ES9876543210987654321098"
             );
 
             when(clienteService.updateCliente(eq(99L), any()))
@@ -265,8 +265,8 @@ class ClienteControllerTest {
                 "Carlos Alberto",
                 "García Lorca",
                 "carlos.nuevo@example.es",
-                "699887766",
-                "ES1234567890123456783456"
+                "+34699887766",
+                "ES9876543210987654321098"
             );
 
             when(clienteService.updateCliente(eq(1L), any()))
