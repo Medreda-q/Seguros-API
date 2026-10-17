@@ -12,14 +12,12 @@ import java.time.OffsetDateTime;
  */
 public record ClienteResponse(
     Long id,
-    String dniNie,
     String dniNieEnmascarado,
     String nombre,
     String apellidos,
     String email,
     String telefono,
     LocalDate fechaNacimiento,
-    String iban,
     String ibanEnmascarado,
     OffsetDateTime createdAt,
     OffsetDateTime updatedAt

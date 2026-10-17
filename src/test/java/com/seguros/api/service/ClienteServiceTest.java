@@ -124,7 +124,8 @@ class ClienteServiceTest {
 
             assertThatThrownBy(() -> clienteService.createCliente(request))
                 .isInstanceOf(BusinessConflictException.class)
-                .hasMessageContaining("Ya existe un cliente registrado con el DNI/NIE 12345678Z");
+                .hasMessageContaining("Ya existe un cliente registrado con el DNI/NIE indicado")
+                .hasMessageNotContaining("12345678Z");
 
             verify(clienteRepository, never()).save(any());
         }
@@ -148,7 +149,8 @@ class ClienteServiceTest {
 
             assertThatThrownBy(() -> clienteService.createCliente(request))
                 .isInstanceOf(BusinessConflictException.class)
-                .hasMessageContaining("Ya existe un cliente registrado con el DNI/NIE 12345678Z");
+                .hasMessageContaining("Ya existe un cliente registrado con el DNI/NIE indicado")
+                .hasMessageNotContaining("12345678Z");
         }
     }
 

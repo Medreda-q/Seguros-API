@@ -49,14 +49,12 @@ class ClienteControllerTest {
 
     private final ClienteResponse sampleResponse = new ClienteResponse(
         1L,
-        "12345678Z",
         "*****678Z",
         "Carlos",
         "García Lorca",
         "carlos@example.es",
-        "+34612345678",
+        "612345678",
         LocalDate.of(1990, 5, 20),
-        "ES1234567890123456789012",
         "ES12 **** **** 9012",
         OffsetDateTime.now(),
         OffsetDateTime.now()
@@ -87,6 +85,8 @@ class ClienteControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.nombre").value("Carlos"))
+                .andExpect(jsonPath("$.dniNie").doesNotExist())
+                .andExpect(jsonPath("$.iban").doesNotExist())
                 .andExpect(jsonPath("$.dniNieEnmascarado").value("*****678Z"))
                 .andExpect(jsonPath("$.ibanEnmascarado").value("ES12 **** **** 9012"))
                 .andExpect(jsonPath("$.createdAt").exists());
@@ -117,7 +117,7 @@ class ClienteControllerTest {
         }
 
         @Test
-        @DisplayName("409 Conflict : Doublon DNI/NIE renvoyé par le service métier")
+        @DisplayName("409 Conflict : Doublon DNI/NIE sans fuite du DNI en clair dans le message")
         void shouldReturn409ConflictOnDuplicateDni() throws Exception {
             ClienteCreateRequest request = new ClienteCreateRequest(
                 "12345678Z",
@@ -130,7 +130,7 @@ class ClienteControllerTest {
             );
 
             when(clienteService.createCliente(any()))
-                .thenThrow(new BusinessConflictException("Ya existe un cliente registrado con el DNI/NIE 12345678Z"));
+                .thenThrow(new BusinessConflictException("Ya existe un cliente registrado con el DNI/NIE indicado"));
 
             mockMvc.perform(post("/api/v1/clientes")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -138,7 +138,8 @@ class ClienteControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Conflicto de negocio"))
                 .andExpect(jsonPath("$.status").value(409))
-                .andExpect(jsonPath("$.detail").value(containsString("Ya existe un cliente")))
+                .andExpect(jsonPath("$.detail").value(containsString("Ya existe un cliente registrado con el DNI/NIE indicado")))
+                .andExpect(jsonPath("$.detail").value(not(containsString("12345678Z"))))
                 .andExpect(jsonPath("$.timestamp").exists());
         }
 

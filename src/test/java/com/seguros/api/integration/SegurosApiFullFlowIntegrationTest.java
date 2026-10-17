@@ -58,6 +58,8 @@ class SegurosApiFullFlowIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(clientePayload))
             .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.dniNie").doesNotExist())
+            .andExpect(jsonPath("$.iban").doesNotExist())
             .andExpect(jsonPath("$.dniNieEnmascarado", is("*****678Z")))
             .andExpect(jsonPath("$.ibanEnmascarado", is("ES12 **** **** 3456")))
             .andExpect(jsonPath("$.nombre", is("Carlos")))

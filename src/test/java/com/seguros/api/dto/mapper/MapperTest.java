@@ -48,7 +48,6 @@ class MapperTest {
 
         ClienteResponse response = ClienteMapper.toResponse(entity);
         assertThat(response.id()).isEqualTo(42L);
-        assertThat(response.dniNie()).isEqualTo("12345678Z");
         assertThat(response.dniNieEnmascarado()).isEqualTo("*****678Z");
         assertThat(response.ibanEnmascarado()).isEqualTo("ES12 **** **** 3456");
 

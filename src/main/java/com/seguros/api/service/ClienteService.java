@@ -56,7 +56,7 @@ public class ClienteService {
 
         String normalizedDniNie = request.dniNie().replaceAll("[\\s-]+", "").toUpperCase(Locale.ROOT);
         if (clienteRepository.existsByDniNie(normalizedDniNie)) {
-            throw new BusinessConflictException("Ya existe un cliente registrado con el DNI/NIE " + request.dniNie());
+            throw new BusinessConflictException("Ya existe un cliente registrado con el DNI/NIE indicado");
         }
 
         Cliente cliente = ClienteMapper.toEntity(request);
@@ -64,7 +64,7 @@ public class ClienteService {
             Cliente saved = clienteRepository.save(cliente);
             return ClienteMapper.toResponse(saved);
         } catch (DataIntegrityViolationException ex) {
-            throw new BusinessConflictException("Ya existe un cliente registrado con el DNI/NIE " + request.dniNie(), ex);
+            throw new BusinessConflictException("Ya existe un cliente registrado con el DNI/NIE indicado", ex);
         }
     }
 

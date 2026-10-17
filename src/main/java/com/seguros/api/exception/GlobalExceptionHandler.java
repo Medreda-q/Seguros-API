@@ -109,7 +109,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
-        log.warn("Violación de integridad de datos en base de datos: {}", ex.getMessage());
+        log.warn("Violación de integridad de datos en base de datos detectada");
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
             HttpStatus.CONFLICT,
             "Conflicto de integridad de datos en el servidor"

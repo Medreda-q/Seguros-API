@@ -64,14 +64,12 @@ public final class ClienteMapper {
 
         return new ClienteResponse(
             cliente.getId(),
-            cliente.getDniNie(),
             MaskingUtils.maskDniNie(cliente.getDniNie()),
             cliente.getNombre(),
             cliente.getApellidos(),
             cliente.getEmail(),
             cliente.getTelefono(),
             cliente.getFechaNacimiento(),
-            cliente.getIban(),
             MaskingUtils.maskIban(cliente.getIban()),
             cliente.getCreatedAt(),
             cliente.getUpdatedAt()
