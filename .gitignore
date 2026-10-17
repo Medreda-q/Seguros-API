@@ -1,0 +1,42 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS / Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-userId
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbproject/load-impl.xml
+/nbproject/build-impl.xml
+
+### VS Code ###
+.vscode/
+
+### Operating System ###
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+### Environment / Secrets / Local configs ###
+.env
+.env.*
+application-local.yml
+application-local.properties
+*.log
