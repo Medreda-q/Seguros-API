@@ -56,4 +56,18 @@ class GlobalExceptionHandlerTest {
         assertThat(problem.getTitle()).isEqualTo("Conflicto de datos");
         assertThat(problem.getProperties()).containsKey("timestamp");
     }
+
+    @Test
+    @DisplayName("400 Bad Request : HttpMessageNotReadableException (JSON malformé ou corps illisible)")
+    void shouldHandleHttpMessageNotReadableException() {
+        org.springframework.http.converter.HttpMessageNotReadableException ex =
+            new org.springframework.http.converter.HttpMessageNotReadableException("JSON parse error: Unexpected character");
+
+        ProblemDetail problem = exceptionHandler.handleHttpMessageNotReadableException(ex);
+
+        assertThat(problem.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST.value());
+        assertThat(problem.getTitle()).isEqualTo("Cuerpo de solicitud inválido");
+        assertThat(problem.getDetail()).isEqualTo("El cuerpo de la solicitud no es legible o contiene un formato JSON inválido");
+        assertThat(problem.getProperties()).containsKey("timestamp");
+    }
 }

@@ -121,6 +121,35 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Erreur de lecture du corps HTTP / JSON mal formé / valeur d'enum invalide -> HTTP 400 Bad Request.
+     */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ProblemDetail handleHttpMessageNotReadableException(org.springframework.http.converter.HttpMessageNotReadableException ex) {
+        log.warn("Cuerpo de solicitud HTTP ilegible o formato JSON inválido: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+            HttpStatus.BAD_REQUEST,
+            "El cuerpo de la solicitud no es legible o contiene un formato JSON inválido"
+        );
+        problem.setTitle("Cuerpo de solicitud inválido");
+        problem.setType(URI.create("about:blank"));
+        problem.setProperty("timestamp", OffsetDateTime.now(clock));
+        return problem;
+    }
+
+    /**
+     * Erreur de type de paramètre dans l'URL ou requête -> HTTP 400 Bad Request.
+     */
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ProblemDetail handleMethodArgumentTypeMismatchException(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex) {
+        String detail = String.format("El parámetro '%s' con valor '%s' no tiene el formato esperado", ex.getName(), ex.getValue());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
+        problem.setTitle("Parámetro de solicitud inválido");
+        problem.setType(URI.create("about:blank"));
+        problem.setProperty("timestamp", OffsetDateTime.now(clock));
+        return problem;
+    }
+
+    /**
      * Exception générique inattendue -> HTTP 500 Internal Server Error (Message neutre + traceId).
      */
     @ExceptionHandler(Exception.class)
