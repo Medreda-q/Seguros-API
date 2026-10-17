@@ -132,7 +132,105 @@ stateDiagram-v2
 
 ---
 
-### 4.4. Algoritmo de Validación DNI / NIE (Módulo 23)
+### 4.4. Reglas de Integridad de Negocio en la Emisión de Pólizas
+
+#### Nota técnica — Reloj inyectado (`java.time.Clock`)
+Todos los controles basados en la fecha actual (`"hoy"`) utilizan un bean `java.time.Clock` con zona horaria `Europe/Madrid`, inyectado como dependencia en los servicios. **Queda prohibido el uso directo de `LocalDate.now()` sin argumento.** Esto permite fijar el reloj en los tests unitarios sin depender de la fecha real del sistema.
+
+```java
+// Correcto (testable):
+LocalDate hoy = LocalDate.now(clock);
+
+// Incorrecto (no testable, zona horaria implícita del servidor):
+LocalDate hoy = LocalDate.now();
+```
+
+#### Regla 4.4.1 — Unicidad de póliza activa por ramo y cliente
+**Un cliente no puede tener más de una póliza en estado `ACTIVA` del mismo tipo (`tipo`) simultáneamente.**
+
+- **Verificación en servicio:** Antes de emitir, se consulta si existe alguna póliza con `estado = ACTIVA` para el mismo `clienteId` y el mismo `tipo`.
+- **Violación detectada:** HTTP **409 Conflict**:
+  > *"El cliente ya tiene una póliza ACTIVA de tipo {tipo}. Cancele o suspenda la póliza existente antes de contratar una nueva."*
+- **Pólizas `SUSPENDIDA` o `CANCELADA`:** No bloquean la emisión.
+
+**Índice único parcial en PostgreSQL (migración V2):**
+```sql
+CREATE UNIQUE INDEX uq_polizas_activa_cliente_tipo
+    ON polizas (cliente_id, tipo)
+    WHERE estado = 'ACTIVA';
+```
+
+> **¿Por qué hace falta si el servicio ya verifica?**
+>
+> El control en el servicio no es suficiente solo. Imagina dos agentes que envían simultáneamente `POST /polizas` para el mismo cliente y el mismo tipo: ambos consultan la base de datos al mismo tiempo, ambos ven que *todavía* no hay ninguna póliza ACTIVA de ese tipo, ambos deciden emitir, y ambos insertan. La base de datos ha aceptado los dos registros antes de que ninguno de los dos pudiera ver el del otro. Esto se llama **condición de carrera** (*race condition*). El índice único parcial actúa como un candado definitivo a nivel de base de datos: PostgreSQL rechazará la segunda inserción con una violación de restricción (`DataIntegrityViolationException`), que el servicio captura y convierte en HTTP **409 Conflict**.
+
+#### Regla 4.4.2 — Fecha de inicio no anterior a la fecha de emisión
+**`fechaInicio` debe ser mayor o igual a `LocalDate.now(clock)`** (fecha a efecto inmediato permitida; sólo se rechaza una fecha en el pasado).
+
+- **Violación detectada:** HTTP **400 Bad Request**:
+  > *"La fecha de inicio de la póliza no puede ser anterior a la fecha de hoy ({hoy})."*
+
+#### Nota — Generación de números de póliza y siniestro (migración V2)
+Los identificadores legibles (`POL-AUTO-2026-0001`, `SIN-2026-0001`) se generan a partir de **secuencias PostgreSQL**, no con `COUNT(*)+1`.
+
+```sql
+-- En V2__sequences_and_constraints.sql
+CREATE SEQUENCE seq_poliza_numero START 1 INCREMENT 1;
+CREATE SEQUENCE seq_siniestro_numero START 1 INCREMENT 1;
+```
+
+> **¿Por qué no `COUNT(*)+1`?**
+>
+> Si dos transacciones calculan `COUNT(*)+1` al mismo tiempo, ambas obtienen el mismo número y una de las dos falla al intentar insertar por la restricción `UNIQUE`. Con una secuencia PostgreSQL, cada llamada a `nextval('seq_poliza_numero')` es atómica y garantizada única, incluso con miles de peticiones simultáneas.
+
+---
+
+### 4.5. Reglas de Integridad de Negocio en la Declaración de Siniestros
+
+**Orden de verificación obligatorio** (el servicio debe respetar este orden exacto para producir mensajes de error coherentes):
+
+| Paso | Control | Error si falla |
+| :---: | :--- | :--- |
+| **1** | La póliza referenciada por `polizaId` existe en la base de datos | **404 Not Found** |
+| **2** | `poliza.estado == ACTIVA` | **409 Conflict** (mensaje específico según estado) |
+| **3** | `poliza.fechaFin >= LocalDate.now(clock)` (póliza no expirada) | **409 Conflict** (mensaje de expiración) |
+| **4** | `poliza.fechaInicio <= fechaOcurrencia <= poliza.fechaFin` | **400 Bad Request** |
+| **5** | `fechaOcurrencia <= LocalDate.now(clock)` (no en el futuro) | **400 Bad Request** |
+
+> *El paso 3 se ejecuta antes que el paso 4 para que el mensaje de error sea preciso: si la póliza está expirada, el motivo real es la expiración, no que la fecha de ocurrencia esté "fuera de rango".*
+
+#### Regla 4.5.1 — Estado de la póliza (paso 2)
+**Solo se pueden declarar siniestros sobre pólizas en estado `ACTIVA`.**
+
+- `SUSPENDIDA` → **409 Conflict**:
+  > *"No se puede declarar un siniestro sobre una póliza SUSPENDIDA. Es necesario regularizar el pago primero."*
+- `CANCELADA` → **409 Conflict**:
+  > *"No se puede declarar un siniestro sobre una póliza CANCELADA."*
+
+#### Regla 4.5.2 — Póliza no expirada en la fecha del servidor (paso 3)
+**Una póliza con `estado = ACTIVA` pero `fechaFin < LocalDate.now(clock)` se considera expirada.** Esta situación es una inconsistencia tolerable en ausencia de un proceso automático de renovación.
+
+- **Verificación:** `poliza.getFechaFin().isBefore(LocalDate.now(clock))`
+- **Violación detectada:** **409 Conflict**:
+  > *"No se puede declarar un siniestro sobre una póliza expirada (vigencia finalizada el {fechaFin})."*
+
+#### Regla 4.5.3 — Vigencia temporal de la fecha de ocurrencia (paso 4)
+**`fechaInicio ≤ fechaOcurrencia ≤ fechaFin`** (ambos extremos incluidos).
+
+- **Violación detectada:** **400 Bad Request**:
+  > *"La fecha de ocurrencia ({fechaOcurrencia}) no está dentro del período de vigencia de la póliza ({fechaInicio} – {fechaFin})."*
+
+#### Regla 4.5.4 — Fecha de ocurrencia no futura (paso 5)
+**`fechaOcurrencia` no puede ser posterior a `LocalDate.now(clock)`.**
+
+- **Violación detectada:** **400 Bad Request**:
+  > *"La fecha de ocurrencia no puede ser una fecha futura."*
+
+> *Esta regla se aplica en la capa de servicio aunque `@PastOrPresent` ya la cubra en el DTO: la doble comprobación garantiza la coherencia incluso si el DTO es invocado directamente (test de integración, etc.).*
+
+---
+
+### 4.6. Algoritmo de Validación DNI / NIE (Módulo 23)
 La tabla de correspondencias del Ministerio del Interior es:
 `TRWAGMYFPDXBNJZSQVHLCKE` (índices 0 a 22).
 
