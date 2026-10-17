@@ -239,7 +239,15 @@ La tabla de correspondencias del Ministerio del Interior es:
    - Cálculo: $\text{resto} = \text{número (8 dígitos)} \pmod{23}$. La letra en la posición `resto` debe coincidir con la letra del DNI.
 2. **NIE:**
    - Formato: 1 letra inicial ('X', 'Y', 'Z') seguida de 7 dígitos y 1 letra de control.
-   - Normalización de la le## 5. Especificación Técnica de la API REST (Fase 1)
+   - Normalización de la letra inicial:
+     - `X` $\rightarrow$ se reemplaza por `0`
+     - `Y` $\rightarrow$ se reemplaza por `1`
+     - `Z` $\rightarrow$ se reemplaza por `2`
+   - Se forma un número de 8 dígitos y se aplica el mismo algoritmo módulo 23.
+
+---
+
+## 5. Especificación Técnica de la API REST (Fase 1)
 
 ### 5.1. Alcance y Seguridad (Autenticación fuera de alcance)
 > **Nota de Seguridad de la Fase 1:**
@@ -379,7 +387,5 @@ Para cualquier error interno imprevisto (`HTTP 500 Internal Server Error`), se a
 | `GET` | `/api/v1/siniestros/{id}` | *Path variable: `id`* | `SiniestroResponse` | `200 OK`<br>`404 Not Found` | Consulta de un siniestro por su ID. |
 | `GET` | `/api/v1/siniestros/numero/{numero}` | *Path variable: `numero`* | `SiniestroResponse` | `200 OK`<br>`404 Not Found` | Consulta de un siniestro por su número de expediente único (ej: `SIN-2026-0001`). |
 | `GET` | `/api/v1/siniestros/poliza/{polizaId}` | *Path variable: `polizaId`* | `List<SiniestroResponse>` | `200 OK`<br>`404 Not Found` | Lista todos los siniestros asociados a una póliza dada (no paginado, baja cardinalidad). |
-| `PATCH` | `/api/v1/siniestros/{id}/estado` | `SiniestroEstadoUpdateRequest` | `SiniestroResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Avance del ciclo de vida del siniestro: `ABIERTO` $\rightarrow$ `EN_REVISION` $\rightarrow$ `APROBADO` / `RECHAZADO` (estados terminales). |
-dos a una póliza dada. |
 | `PATCH` | `/api/v1/siniestros/{id}/estado` | `SiniestroEstadoUpdateRequest` | `SiniestroResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Avance del ciclo de vida del siniestro: `ABIERTO` $\rightarrow$ `EN_REVISION` $\rightarrow$ `APROBADO` / `RECHAZADO` (estados terminales). |
 
