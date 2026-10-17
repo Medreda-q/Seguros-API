@@ -119,13 +119,12 @@ public class Siniestro extends BaseEntity {
         this.estado = estado;
     }
 
-    // Égalité basée sur le numéro unique de sinistre
+    // Égalité basée sur le numéro unique de sinistre, compatible avec les proxys Hibernate
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Siniestro siniestro = (Siniestro) o;
-        return Objects.equals(numero, siniestro.numero);
+        if (!(o instanceof Siniestro other)) return false;
+        return numero != null && Objects.equals(numero, other.getNumero());
     }
 
     @Override

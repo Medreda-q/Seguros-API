@@ -147,13 +147,12 @@ public class Poliza extends BaseEntity {
         this.siniestros = siniestros;
     }
 
-    // Égalité basée sur le numéro de contrat unique
+    // Égalité basée sur le numéro de contrat unique, compatible avec les proxys Hibernate
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Poliza poliza = (Poliza) o;
-        return Objects.equals(numero, poliza.numero);
+        if (!(o instanceof Poliza other)) return false;
+        return numero != null && Objects.equals(numero, other.getNumero());
     }
 
     @Override

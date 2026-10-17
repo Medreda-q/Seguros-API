@@ -135,13 +135,12 @@ public class Cliente extends BaseEntity {
         this.polizas = polizas;
     }
 
-    // Égalité basée sur la clé métier unique dniNie
+    // Égalité basée sur la clé métier unique dniNie, compatible avec les proxys Hibernate
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        Cliente cliente = (Cliente) o;
-        return Objects.equals(dniNie, cliente.dniNie);
+        if (!(o instanceof Cliente other)) return false;
+        return dniNie != null && Objects.equals(dniNie, other.getDniNie());
     }
 
     @Override

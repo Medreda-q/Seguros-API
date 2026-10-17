@@ -4,5 +4,4 @@ Este documento registra de forma cronológica cada error o comportamiento anóma
 
 | Fecha (YYYY-MM-DD) | Entorno (dev / test) | Síntoma observado | Causa raíz | Solución aplicada |
 | :--- | :--- | :--- | :--- | :--- |
-| *Pendiente* | *dev* | *Ejemplo: 400 Bad Request en DNI válido* | *Expresión regular no contempla letra mayúscula* | *Normalizar cadena con `.toUpperCase()` antes de validar* |
-
+| 2026-10-17 | test | Fallo en test JUnit `shouldValidateValidNie` para `Y1234567S` y `Z1234567B` | Error de cálculo aritmético manual en los datos de prueba: $11234567 \pmod{23} = 10 \rightarrow \text{'X'}$ y $21234567 \pmod{23} = 1 \rightarrow \text{'R'}$ | Corregir los casos de prueba con los valores reales calculados por el algoritmo: `Y1234567X` y `Z1234567R`. |
