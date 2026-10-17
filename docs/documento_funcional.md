@@ -247,23 +247,104 @@ La tabla de correspondencias del Ministerio del Interior es:
 
 ---
 
-## 5. Catálogo de Endpoints REST (Fase 1)
+## 5. Especificación Técnica de la API REST (Fase 1)
 
-### 5.1. Clientes (`/api/v1/clientes`)
-- `POST /api/v1/clientes` $\rightarrow$ Alta de cliente (valida DNI/NIE único, IBAN, teléfono, fecha nacimiento >= 18 años). Responde `201 Created` o `400/409 Conflict`.
-- `GET /api/v1/clientes` $\rightarrow$ Listado paginado de clientes. Responde `200 OK`.
-- `GET /api/v1/clientes/{id}` $\rightarrow$ Detalle de cliente por ID. Responde `200 OK` o `404 Not Found`.
-- `PUT /api/v1/clientes/{id}` $\rightarrow$ Modificación de datos de contacto (email, teléfono, IBAN). Responde `200 OK` o `400/404`.
-- `DELETE /api/v1/clientes/{id}` $\rightarrow$ Baja de cliente (solo si no tiene pólizas activas asociadas). Responde `204 No Content` o `409 Conflict`.
+### 5.1. Estándar de Errores: ProblemDetail (RFC 7807)
+Todas las respuestas de error devueltas por la API siguen el estándar internacional **RFC 7807 (`application/problem+json`)**, implementado a través de la clase `org.springframework.http.ProblemDetail`.
 
-### 5.2. Pólizas (`/api/v1/polizas`)
-- `POST /api/v1/polizas` $\rightarrow$ Contratación de póliza. Calcula automáticamente `primaAnual`. Responde `201 Created`.
-- `GET /api/v1/polizas` $\rightarrow$ Listado de pólizas (con filtros opcionales por cliente y estado). Responde `200 OK`.
-- `GET /api/v1/polizas/{id}` $\rightarrow$ Detalle de póliza. Responde `200 OK` o `404 Not Found`.
-- `PATCH /api/v1/polizas/{id}/estado` $\rightarrow$ Cambio controlado de estado (`ACTIVA`, `SUSPENDIDA`, `CANCELADA`). Responde `200 OK` o `400 Bad Request`.
+#### A) Estructura JSON estándar:
+```json
+{
+  "type": "about:blank",
+  "title": "Conflicto de negocio",
+  "status": 409,
+  "detail": "El cliente ya tiene una póliza ACTIVA de tipo AUTO. Cancele o suspenda la póliza existente antes de contratar una nueva.",
+  "instance": "/api/v1/polizas",
+  "timestamp": "2026-10-17T20:30:00Z"
+}
+```
 
-### 5.3. Siniestros (`/api/v1/siniestros`)
-- `POST /api/v1/siniestros` $\rightarrow$ Declaración de siniestro sobre póliza activa. Responde `201 Created` o `400 Bad Request`.
-- `GET /api/v1/siniestros` $\rightarrow$ Listado de siniestros (con filtros opcionales por póliza y estado). Responde `200 OK`.
-- `GET /api/v1/siniestros/{id}` $\rightarrow$ Detalle de siniestro. Responde `200 OK` o `404 Not Found`.
-- `PATCH /api/v1/siniestros/{id}/estado` $\rightarrow$ Avance del flujo del siniestro (`EN_REVISION`, `APROBADO`, `RECHAZADO`). Responde `200 OK` o `400 Bad Request`.
+#### B) Estructura para Errores de Validación Bean (HTTP 400):
+Cuando la validación de un DTO de entrada falla (`@Valid`), se incorpora la extensión `invalidParams` o `errors` con el detalle de cada campo infractor:
+```json
+{
+  "type": "about:blank",
+  "title": "Error de validación",
+  "status": 400,
+  "detail": "La solicitud contiene parámetros inválidos",
+  "instance": "/api/v1/clientes",
+  "timestamp": "2026-10-17T20:30:00Z",
+  "errors": [
+    {
+      "campo": "dniNie",
+      "mensaje": "El DNI/NIE no tiene un formato válido"
+    },
+    {
+      "campo": "email",
+      "mensaje": "El formato del correo electrónico no es válido"
+    }
+  ]
+}
+```
+
+#### C) Matriz de Mapeo de Excepciones a Códigos HTTP:
+
+| Excepción Java | Código HTTP | Razón / Escenario |
+| :--- | :---: | :--- |
+| `ResourceNotFoundException` | **404 Not Found** | Identificador de cliente, póliza o siniestro inexistente en base de datos. |
+| `BusinessConflictException` | **409 Conflict** | Violación de regla de unicidad activa (4.4.1), póliza suspendida/cancelada/expirada en siniestro, cliente con pólizas activas. |
+| `BusinessRuleException` | **400 Bad Request** | Fecha en el pasado (4.4.2), siniestro fuera de vigencia o futuro (4.5.3, 4.5.4), transición de estado inválida, cliente menor de edad. |
+| `MethodArgumentNotValidException` | **400 Bad Request** | Faltan campos obligatorios `@NotNull`, `@NotBlank`, formatos erróneos `@Pattern`, importes no positivos `@Positive`. |
+| `DataIntegrityViolationException` | **409 Conflict** | Detección de colisión concurrente a nivel base de datos no capturada previamente (ej: colisión de índice único). |
+| `Exception` (cualquier error no controlado) | **500 Internal Server Error** | Fallo imprevisto del servidor. Mensaje neutro y controlado. |
+
+#### D) Reglas de Seguridad OWASP para el Manejo de Errores:
+1. **Cero fugas de información interna:** El `GlobalExceptionHandler` **NUNCA** devuelve la traza de la pila (*stack trace*), nombres de tablas SQL, ni mensajes de error de bajo nivel del driver PostgreSQL en las respuestas HTTP.
+2. **Registro seguro (Logging):** Las excepciones se registran en los logs del servidor con nivel `ERROR` o `WARN` con su contexto, mientras que el cliente HTTP sólo recibe mensajes de negocio claros y depurados.
+
+---
+
+### 5.2. Paginación y Protección de Datos Sensibles (PII)
+
+1. **Paginación uniforme:** Todos los listados (`GET`) soportan paginación mediante `org.springframework.data.domain.Pageable`:
+   - Parámetros query: `?page=0&size=20&sort=createdAt,desc`.
+   - Las respuestas devuelven una estructura paginada estándar (`content`, `pageable`, `totalElements`, `totalPages`, etc.).
+2. **Enmascaramiento de PII:** 
+   - El DNI/NIE se expone enmascarado: `*****678Z`.
+   - El IBAN se expone enmascarado: `ES12 **** **** 3456`.
+   - Ninguna respuesta expone contraseñas, claves internas ni proxies Hibernate.
+
+---
+
+### 5.3. Catálogo Detallado de Endpoints REST
+
+#### 5.3.1. Clientes (`/api/v1/clientes`)
+
+| Método | URL | DTO Entrada | DTO Salida | Códigos HTTP | Descripción / Comportamiento |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/clientes` | `ClienteCreateRequest` | `ClienteResponse` | `201 Created`<br>`400 Bad Request`<br>`409 Conflict` | Crea un nuevo cliente asegurado. Valida DNI/NIE módulo 23, IBAN, mayoría de edad ($\ge 18$ años). |
+| `GET` | `/api/v1/clientes` | *Ninguno (Query params de paginación)* | `Page<ClienteResponse>` | `200 OK` | Listado paginado de clientes ordenado por fecha de creación descendente. |
+| `GET` | `/api/v1/clientes/{id}` | *Path variable: `id`* | `ClienteResponse` | `200 OK`<br>`404 Not Found` | Consulta detallada del cliente por su ID. |
+| `PUT` | `/api/v1/clientes/{id}` | `ClienteUpdateRequest` | `ClienteResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Modifica los datos de contacto y facturación (nombre, apellidos, email, teléfono, IBAN). |
+| `DELETE` | `/api/v1/clientes/{id}` | *Path variable: `id`* | *Ninguno (Void)* | `204 No Content`<br>`404 Not Found`<br>`409 Conflict` | Elimina el cliente. Rechazado con 409 si tiene alguna póliza en estado `ACTIVA`. |
+
+#### 5.3.2. Pólizas (`/api/v1/polizas`)
+
+| Método | URL | DTO Entrada | DTO Salida | Códigos HTTP | Descripción / Comportamiento |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/polizas` | `PolizaCreateRequest` | `PolizaResponse` | `201 Created`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Emite una nueva póliza. Calcula automáticamente `primaAnual` en BigDecimal. Aplica Regla 4.4.1 (unicidad activa) y Regla 4.4.2 (`fechaInicio >= hoy`). Genera número `POL-{TIPO}-{ANIO}-{0001}`. |
+| `GET` | `/api/v1/polizas/{id}` | *Path variable: `id`* | `PolizaResponse` | `200 OK`<br>`404 Not Found` | Consulta de póliza por su ID, con DNI/NIE de titular enmascarado. |
+| `GET` | `/api/v1/polizas/numero/{numero}` | *Path variable: `numero`* | `PolizaResponse` | `200 OK`<br>`404 Not Found` | Consulta de póliza por su número legible único (ej: `POL-AUTO-2026-0001`). |
+| `GET` | `/api/v1/polizas/cliente/{clienteId}` | *Path variable: `clienteId`* | `List<PolizaResponse>` | `200 OK`<br>`404 Not Found` | Lista todas las pólizas pertenecientes a un cliente dado. |
+| `PATCH` | `/api/v1/polizas/{id}/estado` | `PolizaEstadoUpdateRequest` | `PolizaResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Transición controlada de estado según la matriz: `ACTIVA` $\leftrightarrow$ `SUSPENDIDA` $\rightarrow$ `CANCELADA`. Reactivación a `ACTIVA` revérifie la Regla 4.4.1. |
+
+#### 5.3.3. Siniestros (`/api/v1/siniestros`)
+
+| Método | URL | DTO Entrada | DTO Salida | Códigos HTTP | Descripción / Comportamiento |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/siniestros` | `SiniestroCreateRequest` | `SiniestroResponse` | `201 Created`<br>`400 Bad Request`<br>`404 Not Found`<br>`409 Conflict` | Declara un nuevo siniestro respetando estrictamente el orden de las 5 verificaciones (404 si póliza no existe, 409 si póliza no ACTIVA o expirada, 400 si fecha fuera de rango o futura). Genera número `SIN-{ANIO}-{0001}` e inicializa en `ABIERTO`. |
+| `GET` | `/api/v1/siniestros/{id}` | *Path variable: `id`* | `SiniestroResponse` | `200 OK`<br>`404 Not Found` | Consulta de un siniestro por su ID. |
+| `GET` | `/api/v1/siniestros/numero/{numero}` | *Path variable: `numero`* | `SiniestroResponse` | `200 OK`<br>`404 Not Found` | Consulta de un siniestro por su número de expediente único (ej: `SIN-2026-0001`). |
+| `GET` | `/api/v1/siniestros/poliza/{polizaId}` | *Path variable: `polizaId`* | `List<SiniestroResponse>` | `200 OK`<br>`404 Not Found` | Lista todos los siniestros asociados a una póliza dada. |
+| `PATCH` | `/api/v1/siniestros/{id}/estado` | `SiniestroEstadoUpdateRequest` | `SiniestroResponse` | `200 OK`<br>`400 Bad Request`<br>`404 Not Found` | Avance del ciclo de vida del siniestro: `ABIERTO` $\rightarrow$ `EN_REVISION` $\rightarrow$ `APROBADO` / `RECHAZADO` (estados terminales). |
+
