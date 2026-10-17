@@ -75,84 +75,99 @@ En Java (et dans la plupart des langages), les types primitifs `float` et `doubl
 #### Ce que nous avons construit :
 - [`src/main/java/com/seguros/api/validator/ValidDniNie.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/validator/ValidDniNie.java) : Annotation personnalisée Bean Validation (`jakarta.validation.Constraint`).
 - [`src/main/java/com/seguros/api/validator/DniNieValidator.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/validator/DniNieValidator.java) : Validateur exécutant l'algorithme officiel modulo 23 avec normalisation préalable (suppression des espaces/tirets et passage en majuscules).
-- [`src/test/java/com/seguros/api/validator/DniNieValidatorTest.java`](file:///C:/dev/seguros-api/src/test/java/com/seguros/api/validator/DniNieValidatorTest.java) : 30 tests unitaires JUnit 5 couvrant tous les cas (valides, invalides, minuscules, espaces, tirets, longueurs erronées, caractères interdits et valeur `null`).
+- [`src/test/java/com/seguros/api/validator/DniNieValidatorTest.java`](file:///C:/dev/seguros-api/src/test/java/com/seguros/api/validator/DniNieValidatorTest.java) : 30 tests unitaires JUnit 5 couvrant tous les cas.
 
 ---
 
-### Concepts Fondamentaux de l'Étape 1.4
+### Étape 1.5 : DTOs (Records Java), Protection Mass Assignment & Masquage PII
 
-#### 1. L'Algorithme Modulo 23 en français simple
-En Espagne, le Ministère de l'Intérieur utilise un système de clé de contrôle mathématique pour vérifier qu'un numéro de document d'identité n'a pas été falsifié ou mal recopié.
+#### Ce que nous avons construit :
+1. **Records Java pour les requêtes (séparation Create vs Update) :**
+   - [`CreateClienteRequest.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/request/CreateClienteRequest.java) : `@NotBlank`, `@ValidDniNie`, `@Email`, `@Past`, `@Pattern` téléphone espagnol (`^[6789][0-9]{8}$`), IBAN espagnol (`^ES[0-9]{22}$`).
+   - [`UpdateClienteRequest.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/request/UpdateClienteRequest.java) : Données de contact et IBAN (DNI et date de naissance immuables).
+   - [`CreatePolizaRequest.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/request/CreatePolizaRequest.java) : Validation de niveau classe `@ValidDateRange` garantissant `fechaFin > fechaInicio`.
+   - [`UpdatePolizaEstadoRequest.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/request/UpdatePolizaEstadoRequest.java) : Transition contrôlée d'état.
+   - [`CreateSiniestroRequest.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/request/CreateSiniestroRequest.java) : `@Size(10, 1000)`, `@PastOrPresent`, `BigDecimal` avec `@Positive` et `@Digits(integer=10, fraction=2)`.
+   - [`UpdateSiniestroEstadoRequest.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/request/UpdateSiniestroEstadoRequest.java) : Avancement du statut du sinistre.
+2. **Records Java pour les réponses & Masquage :**
+   - [`ClienteResponse.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/response/ClienteResponse.java) : Masquage automatique du DNI (`*****678Z`) et de l'IBAN (`ES12 **** **** 3456`).
+   - [`PolizaResponse.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/response/PolizaResponse.java) : Aplatissement du client (`clienteId`, `clienteNombreCompleto`).
+   - [`SiniestroResponse.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/response/SiniestroResponse.java) : Aplatissement de la police (`polizaId`, `polizaNumero`).
+3. **Composants d'infrastructure DTO :**
+   - [`MaskingUtils.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/util/MaskingUtils.java) : Utilitaire centralisé de masquage sécurisé (PII / Banking).
+   - [`ValidDateRange.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/validator/ValidDateRange.java) & [`DateRangeValidator.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/validator/DateRangeValidator.java) : Validation de période.
+   - [`EntityDtoMapper.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/dto/mapper/EntityDtoMapper.java) : Mapping écrit à la main, pur et transparent (sans framework magique).
+4. **Suite de tests unitaires :**
+   - 76 tests unitaires JUnit 5 couvrant la validation des champs obligatoires, textes trop longs, formats invalides, inversion de dates, masquage et mapping.
 
-La table officielle comporte **23 lettres** (les lettres I, Ñ, O, U sont exclues pour éviter les confusions visuelles avec 1, N, 0 ou V) :
-```text
-Index :  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22
-Lettre : T  R  W  A  G  M  Y  F  P  D  X  B  N  J  Z  S  Q  V  H  L  C  K  E
-```
+---
 
-##### A) Cas du DNI (Citoyens espagnols) :
-- Le format se compose de **8 chiffres suivis d'1 lettre**.
-- On prend le nombre formé par les 8 chiffres et on calcule le reste de sa division euclidienne par 23 :
-  $$\text{reste} = \text{nombre} \pmod{23}$$
-- La lettre située à l'index `reste` dans la table doit correspondre exactement à la lettre du DNI.
-- *Exemple :* Pour le DNI `12345678Z` :
-  $$12345678 = 23 \times 536768 + 14$$
-  Le reste est **14**. À l'index 14 de la table se trouve la lettre **Z**. Le DNI est donc valide.
+### Concepts Fondamentaux de l'Étape 1.5
 
-##### B) Cas du NIE (Résidents étrangers) :
-- Le format se compose d'une **lettre initiale ('X', 'Y' ou 'Z') suivie de 7 chiffres et 1 lettre de contrôle**.
-- Pour pouvoir appliquer la même formule mathématique, on remplace la lettre initiale par un chiffre :
-  - **`X` devient `0`**
-  - **`Y` devient `1`**
-  - **`Z` devient `2`**
-- On obtient alors un nombre de 8 chiffres, et on applique exactement le même calcul modulo 23.
-- *Exemple 1 :* Pour le NIE `X1234567L` :
-  - `X` devient `0` $\rightarrow$ le nombre est `01234567` (soit $1234567$).
-  - $1234567 \pmod{23} = 19$. À l'index 19 se trouve la lettre **L**. Valide !
-- *Exemple 2 :* Pour le NIE `Y1234567X` :
-  - `Y` devient `1` $\rightarrow$ le nombre est `11234567`.
-  - $11234567 \pmod{23} = 10$. À l'index 10 se trouve la lettre **X**. Valide !
-- *Exemple 3 :* Pour le NIE `Z1234567R` :
-  - `Z` devient `2` $\rightarrow$ le nombre est `21234567`.
-  - $21234567 \pmod{23} = 1$. À l'index 1 se trouve la lettre **R**. Valide !
-
-#### 2. Pourquoi `null` est considéré valide dans le validateur ?
-C'est une règle d'or de la spécification **Jakarta Bean Validation** :
-- **Principe de responsabilité unique (SRP) :** Un validateur de format ne doit vérifier que le format. La vérification de présence obligatoire incombe à `@NotNull` ou `@NotBlank`.
-- **Composabilité :** Si un champ devient un jour optionnel dans un DTO (ex: mise à jour partielle où l'utilisateur ne transmet pas le DNI), l'annotation `@ValidDniNie` seule n'empêchera pas la requête d'aboutir si la valeur est absente (`null`).
-- Pour rendre le champ obligatoire ET valide, on combine simplement les deux annotations sur le DTO :
+#### 1. Qu'est-ce que la faille de Mass Assignment (OWASP API3:2023 - Broken Object Property Level Authorization) ?
+- **Le danger en français simple :**
+  Imagine que ton contrôleur REST reçoive directement l'entité JPA `Poliza` dans le corps HTTP :
   ```java
-  @NotBlank(message = "El DNI/NIE es obligatorio")
-  @ValidDniNie
-  private String dniNie;
+  @PostMapping("/polizas")
+  public Poliza createPoliza(@RequestBody Poliza poliza) { return repo.save(poliza); }
   ```
+  Un attaquant observe la requête normale : `{"tipo": "AUTO", "clienteId": 1}`.
+  Il décide alors d'injecter des propriétés internes dans son JSON :
+  ```json
+  {
+    "tipo": "AUTO",
+    "clienteId": 1,
+    "primaAnual": 1.00,
+    "estado": "ACTIVA",
+    "numero": "POL-PIRATEE-001"
+  }
+  ```
+  Si l'application désérialise aveuglément le JSON dans l'entité, l'attaquant **impose son propre tarif (1 € au lieu de 750 €)** ou change le statut de son contrat !
+- **La protection par DTO (Data Transfer Object) :**
+  Dans `CreatePolizaRequest`, les champs `id`, `estado`, `primaAnual`, `numero` et dates d'audit **n'existent tout simplement pas**.
+  Même si l'attaquant les envoie dans son JSON, le désérialiseur Jackson les ignore royalement. C'est le serveur — et lui seul — qui calcule la prime et génère le numéro selon les règles métier.
+
+#### 2. Pourquoi utiliser les `record` Java pour les DTOs ?
+Introduits en Java 16, les `records` sont des conteneurs de données immuables :
+- **Immuabilité garantie :** Tous les champs sont `private final`. Une fois instancié à la réception HTTP, le DTO ne peut plus être altéré par inadvertance.
+- **Concision extrême :** Le compilateur génère automatiquement le constructeur canonique, les accesseurs (ex. `request.dniNie()`), `equals()`, `hashCode()` et `toString()`, évitant les annotations verbeuses type Lombok.
+- **Sérialisation optimisée :** Jackson sait sérialiser et désérialiser nativement les records via leur constructeur canonique sans passer par des setters mutables.
+
+#### 3. Masquage PII et RGPD (Privacy by Design)
+- Un client ou un agent consultant une police n'a pas besoin de voir l'intégralité du compte bancaire ou du DNI.
+- L'exposition complète de l'IBAN dans les réponses d'API enfreint le principe de minimisation des données (RGPD art. 5c).
+- Le masquage (`ES12 **** **** 3456` et `*****678Z`) permet à l'utilisateur de vérifier qu'il s'agit du bon compte tout en neutralisant le risque de vol de données en cas d'interception ou de fuite d'écran.
 
 ---
 
-### Questions d'entretien technique (Étape 1.4)
+### Questions d'entretien technique (Étape 1.5)
 
-1. **Comment fonctionne le cycle de vie d'un `ConstraintValidator` dans Spring Boot ?**
-   - *Réponse :* Le conteneur Bean Validation instancie le validateur lors de la première validation. S'il s'agit d'un composant géré par Spring (`@Component`), Spring injecte automatiquement ses dépendances. La méthode `isValid(value, context)` est ensuite invoquée à chaque validation de champ annoté.
+1. **Pourquoi sépare-t-on `CreateRequest` et `UpdateRequest` au lieu d'utiliser un seul DTO ?**
+   - *Réponse :* Les règles de validation et le cycle de vie diffèrent : lors de la création d'un client, son DNI et sa date de naissance sont obligatoires ; lors d'une mise à jour de coordonnées, ces identifiants légaux sont immuables et ne doivent pas pouvoir être modifiés via l'API.
 
-2. **Pourquoi doit-on normaliser les entrées utilisateur (suppression d'espaces/tirets, passage en majuscules) avant de valider l'algorithme ?**
-   - *Réponse :* Les utilisateurs peuvent saisir des formats variés (`12345678-Z`, `12345678 z`, `x1234567l`). La normalisation évite des faux négatifs d'ergonomie tout en garantissant que la valeur qui atteindra la base de données est propre, uniforme et canonique.
+2. **Quelle est la différence entre `@NotNull`, `@NotEmpty` et `@NotBlank` ?**
+   - *Réponse :*
+     - `@NotNull` : Rejette uniquement `null` (accepte une chaîne vide `""` ou des espaces `" "`).
+     - `@NotEmpty` : Rejette `null` et les chaînes de longueur 0 `""` (mais accepte des espaces `" "`).
+     - `@NotBlank` : Le plus strict, rejette `null`, les chaînes vides `""` et les chaînes ne contenant que des espaces blancs `"   "`.
 
-3. **Quelle est la différence entre une validation par Regex et une validation algorithmique par clé de contrôle ?**
-   - *Réponse :* Une Regex valide uniquement la syntaxe et la structure (ex: 8 chiffres et 1 lettre), mais accepterait n'importe quelle fausse lettre (comme `12345678A`). La clé de contrôle calcule la relation arithmétique exacte entre les chiffres et la lettre, détectant les erreurs de frappe et les faux identifiants.
+3. **Pourquoi applique-t-on `@Digits(integer = 10, fraction = 2)` en plus de `@Positive` sur un montant monétaire ?**
+   - *Réponse :* `@Positive` vérifie que le nombre est $> 0$, mais n'empêche pas un utilisateur d'envoyer $12.34567$ ou un nombre avec 50 chiffres. `@Digits` impose la conformité comptable (2 décimales pour les centimes) et protège la base de données contre les dépassements de capacité sur les colonnes `NUMERIC(12, 2)`.
 
-4. **Pourquoi les lettres I, Ñ, O et U sont-elles absentes de la table de contrôle DNI espagnole ?**
-   - *Réponse :* Pour des raisons de lisibilité optique et de sécurité : le 'I' ressemble au chiffre 1, le 'O' ressemble au chiffre 0, le 'U' se confond avec le 'V', et le 'Ñ' n'existe pas dans tous les claviers internationaux ou systèmes informatiques anciens.
+4. **Pourquoi préfère-t-on un mapping écrit à la main au démarrage d'un projet plutôt qu'un outil de reflection dynamique comme ModelMapper ?**
+   - *Réponse :* Les frameworks dynamiques utilisent l'introspection (reflection), ce qui ralentit l'exécution, masque les erreurs à la compilation (découverte des bugs au runtime) et peut déclencher accidentellement le chargement paresseux de collections JPA entières. Un mapper écrit à la main est vérifié à la compilation, ultra-performant et totalement transparent.
 
-5. **Où doit se situer l'appel de Bean Validation dans une architecture REST sécurisée ?**
-   - *Réponse :* Dans le contrôleur REST, via l'annotation `@Valid` sur le `@RequestBody` du DTO. Cela permet d'intercepter et de rejeter les charges utiles malformées dès la couche d'exposition HTTP (erreur 400 Bad Request) avant d'engager des transactions ou des ressources en base de données.
+5. **Comment valide-t-on une règle métier portant sur deux champs interdépendants (ex. date de fin postérieure à date de début) ?**
+   - *Réponse :* Les annotations de champ standard (`@Future`, `@Past`) ne comparent les champs qu'à l'instant présent. Pour comparer deux champs entre eux, on crée une annotation de validation au niveau de la classe/record (`ElementType.TYPE`), où le validateur a accès à l'instance complète du DTO.
 
 ---
 
 ### Exercices pratiques pour toi
 
-1. **Exercice 1 (Calcul manuel) :**
-   - Soit un citoyen étranger titulaire du NIE commençant par la lettre **Y** et suivi des chiffres `9876543`.
-   - Remplace la lettre Y par son équivalent numérique.
-   - Calcule le reste de la division par 23 et déduis-en la lettre de contrôle officielle.
-2. **Exercice 2 (Sécurité des entrées) :**
-   - Pourquoi le validateur utilise-t-il `Locale.ROOT` lors de l'appel à `.toUpperCase(Locale.ROOT)` plutôt que le simple `.toUpperCase()` sans paramètre ? Quel bug de sécurité historique (notamment avec la langue turque et la lettre 'i') cela prévient-il ?
+1. **Exercice 1 (Sécurité & Mass Assignment) :**
+   - Si un attaquant envoie la requête suivante à `POST /api/v1/siniestros` :
+     `{"polizaId": 1, "descripcion": "Accidente en parking", "fechaOcurrencia": "2026-05-10", "importeReclamado": 500.00, "estado": "APROBADO"}`
+   - Explique pourquoi le champ `"estado": "APROBADO"` sera totalement inopérant et dans quel état réel le sinistre sera créé en base de données.
+2. **Exercice 2 (Conception d'annotations) :**
+   - Observe l'interface [`DateRangeAware.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/validator/DateRangeAware.java) et [`DateRangeValidator.java`](file:///C:/dev/seguros-api/src/main/java/com/seguros/api/validator/DateRangeValidator.java).
+   - Si nous devions plus tard ajouter un DTO `CampaignPromotionRequest` ayant aussi `fechaInicio` et `fechaFin`, que suffit-il de faire pour réutiliser la validation sans écrire une seule ligne de code de validation supplémentaire ?

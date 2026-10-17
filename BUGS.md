@@ -4,4 +4,4 @@ Este documento registra de forma cronológica cada error o comportamiento anóma
 
 | Fecha (YYYY-MM-DD) | Entorno (dev / test) | Síntoma observado | Causa raíz | Solución aplicada |
 | :--- | :--- | :--- | :--- | :--- |
-| 2026-10-17 | test | Fallo en test JUnit `shouldValidateValidNie` para `Y1234567S` y `Z1234567B` | Error de cálculo aritmético manual en los datos de prueba: $11234567 \pmod{23} = 10 \rightarrow \text{'X'}$ y $21234567 \pmod{23} = 1 \rightarrow \text{'R'}$ | Corregir los casos de prueba con los valores reales calculados por el algoritmo: `Y1234567X` y `Z1234567R`. |
+| 2026-10-17 | test | Fallo en test unitario JUnit `shouldValidateValidNie` para `Y1234567S` y `Z1234567B` | El algoritmo del validador de producción (`DniNieValidator`) era 100% correcto. El error residía exclusivamente en los valores esperados del test unitario debido a un cálculo aritmético manual erróneo del módulo 23 ($11234567 \pmod{23} = 10 \rightarrow \text{'X'}$ y no 'S'; $21234567 \pmod{23} = 1 \rightarrow \text{'R'}$ y no 'B'). | Corregir los casos de prueba en `DniNieValidatorTest` con los valores oficiales calculados por el algoritmo: `Y1234567X` y `Z1234567R`. |
