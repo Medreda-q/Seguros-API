@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: seguros-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: seguros_admin
+      POSTGRES_PASSWORD: seguros_secret
+      POSTGRES_DB: seguros_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - seguros_pgdata:/var/lib/postgresql/data
+      - ./docker/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seguros_admin -d seguros_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  seguros_pgdata:
+    driver: local
