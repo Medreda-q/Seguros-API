@@ -89,7 +89,7 @@ Toute déclaration de sinistre doit respecter scrupuleusement l'ordre de validat
 | **1.5** | ✅ Fait | DTOs records Java, mappers manuels, masquage PII, validation Bean | `54bf0e8` |
 | **1.6** | ✅ Fait | Repositories JPA (`@EntityGraph`, `JOIN FETCH`), Flyway V2 (séquences + index partiel), tests `@DataJpaTest` sur PostgreSQL réel (73 tests passés) | `eb0d259` |
 | **1.7** | ✅ Fait | Services métier (`ClienteService`, `PolizaService`, `SiniestroService`, `CalculadoraPrimaService`), bean `Clock` injecté, transactions `@Transactional`, séquences, 131 tests unitaires et intégration passés | `db961e8` |
-| **1.8** | ⏳ À faire | Contrôleurs REST, ProblemDetail RFC 7807, Swagger/OpenAPI | - |
+| **1.8** | ✅ Fait | Contrôleurs REST (`ClienteController`, `PolizaController`, `SiniestroController`), ProblemDetail RFC 7807 (`GlobalExceptionHandler`), Swagger/OpenAPI, 173 tests au vert | `ddc4802` |
 | **1.9** | ⏳ À faire | Tests d'intégration de bout en bout (`@SpringBootTest`, MockMvc) & Postman | - |
 | **1.10**| ⏳ À faire | Documentation finale (`README.md`, `STUDY_GUIDE.md`) | - |
 
